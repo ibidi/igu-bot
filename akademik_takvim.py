@@ -19,28 +19,43 @@ def akademik_takvim_getir(fakulte=None, yil=None, olay=None):
         response = requests.get(url)
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Takvim tablosunu bul
-        table = soup.find('table', {'class': 'table'})
+        # Takvim tablosunu bul - farklı class'ları dene
+        table = soup.find('table', {'class': ['table', 'table-bordered', 'akademik-takvim']})
         
         if not table:
-            return "Akademik takvim tablosu bulunamadı."
+            # Alternatif tablo arama yöntemi
+            tables = soup.find_all('table')
+            if tables:
+                table = tables[0]  # İlk tabloyu al
+            else:
+                return "Akademik takvim tablosu bulunamadı."
         
         # Tablo başlıklarını al
         headers = []
-        for th in table.find_all('th'):
-            headers.append(th.text.strip())
+        header_row = table.find('tr')
+        if header_row:
+            for th in header_row.find_all(['th', 'td']):
+                headers.append(th.text.strip())
+        
+        if not headers:
+            headers = ['Akademik Yıl', 'Fakülte/Program Adı', 'İdari Olay', 'Başlangıç Tarihi', 'Bitiş Tarihi', 'Açıklama']
         
         # Tablo verilerini al
         rows = []
         for tr in table.find_all('tr')[1:]:  # İlk satırı (başlıkları) atla
             row = []
             for td in tr.find_all('td'):
-                row.append(td.text.strip())
-            if row:  # Boş satırları filtrele
-                rows.append(row)
+                # HTML etiketlerini temizle
+                text = ' '.join(td.stripped_strings)
+                row.append(text)
+            if row and len(row) >= len(headers):  # Geçerli satırları filtrele
+                rows.append(row[:len(headers)])  # Başlık sayısı kadar veri al
         
         # DataFrame oluştur
         df = pd.DataFrame(rows, columns=headers)
+        
+        # Boş sütunları temizle
+        df = df.dropna(how='all')
         
         # Filtreleme yap
         if fakulte:
@@ -68,12 +83,16 @@ def akademik_takvim_getir(fakulte=None, yil=None, olay=None):
         
         # En fazla 10 sonuç göster
         for _, row in df.head(10).iterrows():
-            takvim_mesaji += f"📍 {row['İdari Olay']}\n"
-            takvim_mesaji += f"📚 {row['Fakülte/Program Adı']}\n"
-            takvim_mesaji += f"📅 {row['Başlangıç Tarihi']} - {row['Bitiş Tarihi']}\n"
-            if pd.notna(row.get('Açıklama', '')):
-                takvim_mesaji += f"ℹ️ {row['Açıklama']}\n"
-            takvim_mesaji += "\n"
+            try:
+                takvim_mesaji += f"📍 {row.get('İdari Olay', 'Belirtilmemiş')}\n"
+                takvim_mesaji += f"📚 {row.get('Fakülte/Program Adı', 'Tüm Fakülteler')}\n"
+                takvim_mesaji += f"📅 {row.get('Başlangıç Tarihi', '')} - {row.get('Bitiş Tarihi', '')}\n"
+                if pd.notna(row.get('Açıklama')):
+                    takvim_mesaji += f"ℹ️ {row['Açıklama']}\n"
+                takvim_mesaji += "\n"
+            except Exception as e:
+                logger.error(f"Satır formatlanırken hata: {str(e)}")
+                continue
         
         if len(df) > 10:
             takvim_mesaji += f"\n... ve {len(df) - 10} etkinlik daha.\n"
@@ -90,14 +109,54 @@ def get_fakulte_listesi():
     try:
         response = requests.get("https://oidb.gelisim.edu.tr/tr/idari-akademik-takvim")
         soup = BeautifulSoup(response.content, 'html.parser')
-        table = soup.find('table', {'class': 'table'})
+        
+        # Farklı tablo class'larını dene
+        table = soup.find('table', {'class': ['table', 'table-bordered', 'akademik-takvim']})
+        
+        if not table:
+            tables = soup.find_all('table')
+            if tables:
+                table = tables[0]
+            else:
+                return []
         
         fakulteler = set()
         for tr in table.find_all('tr')[1:]:
-            fakulte = tr.find_all('td')[1].text.strip()
-            if fakulte:
-                fakulteler.add(fakulte)
+            cells = tr.find_all('td')
+            if len(cells) > 1:
+                fakulte = cells[1].text.strip()
+                if fakulte and fakulte != "Fakülte/Program Adı":
+                    fakulteler.add(fakulte)
         
         return sorted(list(fakulteler))
-    except:
-        return [] 
+    except Exception as e:
+        logger.error(f"Fakülte listesi çekilirken hata oluştu: {str(e)}")
+        return []
+
+def debug_table_structure():
+    """Tablo yapısını debug etmek için yardımcı fonksiyon"""
+    try:
+        response = requests.get("https://oidb.gelisim.edu.tr/tr/idari-akademik-takvim")
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        print("Bulunan tablolar:")
+        for i, table in enumerate(soup.find_all('table')):
+            print(f"\nTablo {i+1}:")
+            print(f"Class: {table.get('class', 'No class')}")
+            print(f"ID: {table.get('id', 'No id')}")
+            
+            headers = []
+            header_row = table.find('tr')
+            if header_row:
+                headers = [th.text.strip() for th in header_row.find_all(['th', 'td'])]
+            print(f"Başlıklar: {headers}")
+            
+            row_count = len(table.find_all('tr'))
+            print(f"Satır sayısı: {row_count}")
+            
+    except Exception as e:
+        print(f"Hata: {str(e)}")
+
+# Debug için çağır
+if __name__ == "__main__":
+    debug_table_structure() 
