@@ -2,6 +2,14 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime
+import logging  # En üste ekleyin
+
+# Logger'ı tanımla
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 def akademik_takvim_getir(fakulte=None, yil=None, olay=None):
     """Akademik takvim bilgilerini web sitesinden çeker"""

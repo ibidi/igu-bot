@@ -5,6 +5,9 @@ from akademik_takvim import akademik_takvim_getir, get_fakulte_listesi
 from igu_uygulamalar import UygulamalarManager
 from telebot import types  # Butonlar için types'ı import ediyoruz
 from igu_duyurular import DuyuruManager
+import logging
+import sys
+from typing import List
 
 # .env dosyasından bot token'ı yükleme
 load_dotenv()
@@ -14,6 +17,13 @@ TOKEN = os.getenv('BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
 uygulama_manager = UygulamalarManager()
 duyuru_manager = DuyuruManager()
+
+# Loglama ayarları
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -116,16 +126,37 @@ def uygulamalar(message):
         reply_markup=markup
     )
 
+def truncate_message(message: str, max_length: int = 4096) -> List[str]:
+    """Uzun mesajları Telegram limitlerine uygun parçalara böler"""
+    if len(message) <= max_length:
+        return [message]
+    
+    parts = []
+    while message:
+        if len(message) <= max_length:
+            parts.append(message)
+            break
+        
+        # En yakın satır sonunu bul
+        split_index = message.rfind('\n', 0, max_length)
+        if split_index == -1:
+            split_index = max_length
+        
+        parts.append(message[:split_index])
+        message = message[split_index:].lstrip()
+    
+    return parts
+
+# Uzun mesajları bölmek için kullan
 @bot.callback_query_handler(func=lambda call: call.data.startswith('kategori_'))
 def kategori_handler(call):
-    """Kategori seçildiğinde çalışacak handler"""
-    # Seçilen kategoriyi al
     kategori = call.data.replace('kategori_', '')
-    
-    # Kategori detaylarını al
     mesaj = uygulama_manager.get_kategori_detay(kategori)
     
-    # Geri dönüş butonu ekle
+    # Mesajı parçalara böl
+    mesaj_parcalari = truncate_message(mesaj)
+    
+    # İlk parçayı gönder
     markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton(
@@ -134,13 +165,21 @@ def kategori_handler(call):
         )
     )
     
-    # Mevcut mesajı güncelle
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=mesaj,
-        reply_markup=markup
-    )
+    for i, parca in enumerate(mesaj_parcalari):
+        if i == 0:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=parca,
+                reply_markup=markup if i == len(mesaj_parcalari)-1 else None
+            )
+        else:
+            # Ek parçaları yeni mesaj olarak gönder
+            bot.send_message(
+                chat_id=call.message.chat.id,
+                text=parca,
+                reply_markup=markup if i == len(mesaj_parcalari)-1 else None
+            )
 
 @bot.callback_query_handler(func=lambda call: call.data == "ana_menu")
 def ana_menu_handler(call):
@@ -228,8 +267,59 @@ def duyuru_menu_handler(call):
 
 def main():
     """Bot'u başlat"""
-    print("Bot başlatılıyor...")
-    bot.infinity_polling()
+    try:
+        print("Bot başlatılıyor...")
+        bot.infinity_polling(timeout=60, long_polling_timeout=60)
+    except Exception as e:
+        logger.error(f"Bot çalışırken hata oluştu: {e}")
+        sys.exit(1)
+
+# Hata yakalama için decorator ekleyelim
+def handle_errors(func):
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"{func.__name__} fonksiyonunda hata: {e}")
+            # Kullanıcıya hata mesajı gönder
+            if len(args) > 0 and hasattr(args[0], 'message'):
+                bot.reply_to(args[0].message, "⚠️ Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+    return wrapper
+
+# Tüm handler'lara hata yakalama ekleyelim
+@handle_errors
+@bot.message_handler(commands=['start'])
+def start(message):
+    """Bot başlatıldığında çalışacak komut"""
+    bot.reply_to(message, 
+        'Merhaba! IGU Bot\'una hoş geldiniz! 🎓\n\n'
+        'Kullanabileceğiniz komutlar:\n'
+        '/yemek - Günlük yemek menüsü\n'
+        '/iban - Üniversite IBAN bilgileri\n'
+        # '/bilgiler - Üniversite iletişim bilgileri\n'
+        '/duyurular - Son duyurular\n'
+        '/takvim - Akademik takvim bilgileri\n'
+        '/uygulamalar - IGÜ Uygulamaları'
+    )
+
+@handle_errors
+@bot.message_handler(commands=['duyurular'])
+def duyurular(message):
+    """Son duyuruları gösteren komut"""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    
+    # Duyuru ve slider butonları
+    buttons = [
+        types.InlineKeyboardButton("📢 Duyurular", callback_data="show_duyurular"),
+        types.InlineKeyboardButton("🎯 Güncel Görseller", callback_data="show_sliders")
+    ]
+    markup.add(*buttons)
+    
+    bot.reply_to(
+        message,
+        "Lütfen görüntülemek istediğiniz kategoriyi seçin:",
+        reply_markup=markup
+    )
 
 if __name__ == '__main__':
     main() 

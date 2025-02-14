@@ -62,12 +62,13 @@ class DuyuruManager:
             soup = BeautifulSoup(response.content, 'html.parser')
             
             duyurular = []
-            duyuru_container = soup.find('div', {'class': 'duyurular'})
+            duyuru_container = soup.find('div', {'class': 'announcements'}) or \
+                              soup.find('div', {'class': 'duyurular'})
             
             if duyuru_container:
-                for item in duyuru_container.find_all('div', {'class': 'duyuru-item'}):
-                    baslik = item.find('h3').text.strip() if item.find('h3') else ""
-                    tarih = item.find('span', {'class': 'tarih'}).text.strip() if item.find('span', {'class': 'tarih'}) else ""
+                for item in duyuru_container.find_all(['div', 'article'], {'class': ['announcement-item', 'duyuru-item']}):
+                    baslik = item.find(['h3', 'h4', 'h5']).text.strip() if item.find(['h3', 'h4', 'h5']) else ""
+                    tarih = item.find(['span', 'div'], {'class': ['date', 'tarih']}).text.strip() if item.find(['span', 'div'], {'class': ['date', 'tarih']}) else ""
                     link = item.find('a')['href'] if item.find('a') else ""
                     
                     if link and not link.startswith('http'):
