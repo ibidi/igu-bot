@@ -30,9 +30,7 @@
 
 - Python 3.x
 - pyTelegramBotAPI
-- BeautifulSoup4
 - Requests
-- Python-dotenv
 
 ## 🚀 Kurulum
 
